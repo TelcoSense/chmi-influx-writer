@@ -1,0 +1,8 @@
+config.ini
+*.log
+
+data_db/
+realtime/
+
+2024/
+2025/
