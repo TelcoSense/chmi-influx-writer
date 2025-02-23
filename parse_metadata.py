@@ -113,17 +113,17 @@ for year in [2024, 2025]:
 
 all_measurements_df_10m = pd.DataFrame(all_measurements_10m).drop_duplicates()
 all_measurements_10m = sorted(all_measurements_df_10m.values.tolist())
-with open(f"measurements_10m.json", "w", encoding="utf-8") as file:
+with open(f"data_db/measurements_10m.json", "w", encoding="utf-8") as file:
     json.dump(all_measurements_10m, file, indent=4, ensure_ascii=False)
 
 all_measurements_df_1h = pd.DataFrame(all_measurements_1h).drop_duplicates()
 all_measurements_1h = sorted(all_measurements_df_1h.values.tolist())
-with open(f"measurements_1h.json", "w", encoding="utf-8") as file:
+with open(f"data_db/measurements_1h.json", "w", encoding="utf-8") as file:
     json.dump(all_measurements_1h, file, indent=4, ensure_ascii=False)
 
 all_measurements_df_dly = pd.DataFrame(all_measurements_dly).drop_duplicates()
 all_measurements_dly = sorted(all_measurements_df_dly.values.tolist())
-with open(f"measurements_dly.json", "w", encoding="utf-8") as file:
+with open(f"data_db/measurements_dly.json", "w", encoding="utf-8") as file:
     json.dump(all_measurements_dly, file, indent=4, ensure_ascii=False)
 
 merged_ws_dict = {}
@@ -131,5 +131,5 @@ for json_data in ws_dicts:
     merged_ws_dict = merger.merge(merged_ws_dict, json_data)
 merged_ws_dict = {k: merged_ws_dict[k] for k in sorted(merged_ws_dict)}
 
-with open(f"weather_stations.json", "w", encoding="utf-8") as file:
+with open(f"data_db/weather_stations.json", "w", encoding="utf-8") as file:
     json.dump(merged_ws_dict, file, indent=4, ensure_ascii=False)

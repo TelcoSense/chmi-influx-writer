@@ -3,17 +3,21 @@ import json
 import logging
 import os
 import shutil
+import sys
 import time
 from datetime import datetime, timedelta, timezone
 
 import requests
 import schedule
+from tqdm import tqdm
 
 logging.basicConfig(
-    filename="task_scheduler.log",
+    # filename="task_scheduler.log",
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
+    stream=sys.stdout,
 )
+
 
 config = configparser.ConfigParser()
 config.read("config.ini")
@@ -71,24 +75,34 @@ def write_latest_data():
     start_time = start_time.replace(minute=0, second=0, microsecond=0)
     # delete the realtime folder and its contents
     realtime_folder = config.get("folders", "realtime_folder")
-    if os.path.exists(realtime_folder):
-        shutil.rmtree(realtime_folder)
+
+    # if os.path.exists(realtime_folder):
+    #     shutil.rmtree(realtime_folder)
+
     # create it again
-    os.makedirs(realtime_folder)
+    os.makedirs(realtime_folder, exist_ok=True)
     # get the file urls to download
     file_urls = get_file_urls(config.get("folders", "chmi_now_folder"))
-    for file_url in file_urls:
-        download_file(file_url, realtime_folder)
+    logging.info("Downloading latest data from CHMI...")
+
+    # for file_url in tqdm(file_urls, ascii=True):
+    #     download_file(file_url, realtime_folder)
+
     data_files = os.listdir(realtime_folder)
-    for data_file in data_files:
+    logging.info(f"Parsing data from {len(data_files)} weather stations.")
+    for data_file in data_files[:1]:
         with open(
             os.path.join(realtime_folder, data_file), "r", encoding="utf-8"
         ) as file:
             data = json.load(file)
+        print(start_time.date())
+        date_string = start_time.strftime("%Y%m%d")
+        # get current weather station id (WSI)
+        wsi = data_file.removeprefix("10m-").removesuffix(f"-{date_string}.json")
 
 
 def schedule_task():
-    schedule.every().hour.at(":36").do(write_latest_data)
+    schedule.every().hour.at(":30").do(write_latest_data)
 
 
 def run_scheduler():
@@ -102,9 +116,10 @@ def run_scheduler():
 
 
 if __name__ == "__main__":
-    logging.info("Starting the task scheduler...")
-    schedule_task()
-    run_scheduler()
+    logging.info("Starting the program...")
+    # schedule_task()
+    # run_scheduler()
+    write_latest_data()
 
 
 # def parse_utc_date(date_str):
