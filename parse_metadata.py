@@ -1,31 +1,37 @@
 import json
 import os
+from collections.abc import Mapping
 
 import pandas as pd
-from deepmerge import Merger
 
 
-# json merging
-def list_union(config, path, base, incoming):
-    return [list(x) for x in set(tuple(i) for i in base + incoming)]
-
-
-def dict_union(config, path, base, incoming):
-    merged = base.copy()
-    for key, value in incoming.items():
-        if key not in merged:
-            merged[key] = value
+# merging funcs
+def deep_merge(*dicts):
+    merged = {}
+    for d in dicts:
+        for key, value in d.items():
+            if (
+                isinstance(value, Mapping)
+                and key in merged
+                and isinstance(merged[key], Mapping)
+            ):
+                merged[key] = deep_merge(merged[key], value)
+            elif (
+                isinstance(value, list)
+                and key in merged
+                and isinstance(merged[key], list)
+            ):
+                merged[key] = merge_lists(merged[key], value)
+            else:
+                merged[key] = value
     return merged
 
 
-merger = Merger(
-    [
-        (list, list_union),
-        (dict, dict_union),
-    ],
-    ["override"],
-    ["override"],
-)
+def merge_lists(list1, list2):
+    result = []
+    result.extend(list1)
+    result.extend(list2)
+    return sorted(pd.DataFrame(result).drop_duplicates().values.tolist())
 
 
 def extract_chmi_metadata(path: str) -> tuple[list, list]:
@@ -126,10 +132,11 @@ all_measurements_dly = sorted(all_measurements_df_dly.values.tolist())
 with open(f"data_db/measurements_dly.json", "w", encoding="utf-8") as file:
     json.dump(all_measurements_dly, file, indent=4, ensure_ascii=False)
 
+
 merged_ws_dict = {}
 for json_data in ws_dicts:
-    merged_ws_dict = merger.merge(merged_ws_dict, json_data)
-merged_ws_dict = {k: merged_ws_dict[k] for k in sorted(merged_ws_dict)}
+    merged_ws_dict = deep_merge(merged_ws_dict, json_data)
+
 
 with open(f"data_db/weather_stations.json", "w", encoding="utf-8") as file:
     json.dump(merged_ws_dict, file, indent=4, ensure_ascii=False)

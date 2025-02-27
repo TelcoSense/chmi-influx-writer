@@ -39,7 +39,7 @@ for month in range(1, 2):
             f"./{year}/data/10min/{month_folder}/{data_file}", "r", encoding="utf-8"
         ) as file:
             data = json.load(file)
-        headers = data["data"]["data"]["header"].split(",")
+        # headers = data["data"]["data"]["header"].split(",")
         values = data["data"]["data"]["values"]
         data_to_write = []
         for value in values:

@@ -5,7 +5,6 @@ import requests
 
 
 def get_file_links(folder_url):
-    """Retrieve the list of file links."""
     response = requests.get(folder_url)
     if response.status_code == 200:
         html_text = response.text

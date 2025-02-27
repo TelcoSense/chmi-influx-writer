@@ -4,7 +4,7 @@ import json
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session
 
-from chmi_metadata_db import (
+from chmi_weather_station_db import (
     Base,
     Measurement1H,
     Measurement10M,
@@ -116,37 +116,34 @@ for wsi in weather_stations:
             )
             weather_station_db.measurements_dly = measurements_dly
 
-# define the SQL view
-SHOW_WEATHER_STATIONS_VIEW = text(
-    """
-    CREATE OR REPLACE VIEW show_weather_stations AS
-    SELECT
-        ws.id,
-        ws.wsi,
-        ws.gh_id,
-        ws.full_name,
-        ws.X,
-        ws.Y,
-        ws.elevation,
-        GROUP_CONCAT(DISTINCT CONCAT(m10.name, ' [', m10.unit, ']') ORDER BY m10.name SEPARATOR ', ') AS measurements_10m,
-        GROUP_CONCAT(DISTINCT CONCAT(m1h.name, ' [', m1h.unit, ']') ORDER BY m1h.name SEPARATOR ', ') AS measurements_1h,
-        GROUP_CONCAT(DISTINCT CONCAT(mdly.name, ' [', mdly.unit, ']') ORDER BY mdly.name SEPARATOR ', ') AS measurements_dly
-    FROM weather_stations ws
-    LEFT JOIN weather_station_measurements_10m wsm10 ON ws.id = wsm10.weather_station_id
-    LEFT JOIN measurements_10m m10 ON wsm10.measurement_10m_id = m10.id
-    LEFT JOIN weather_station_measurements_1h wsm1h ON ws.id = wsm1h.weather_station_id
-    LEFT JOIN measurements_1h m1h ON wsm1h.measurement_1h_id = m1h.id
-    LEFT JOIN weather_station_measurements_dly wsmdly ON ws.id = wsmdly.weather_station_id
-    LEFT JOIN measurements_dly mdly ON wsmdly.measurement_dly_id = mdly.id
-    GROUP BY ws.id, ws.wsi, ws.gh_id, ws.full_name, ws.X, ws.Y, ws.elevation;
-"""
-)
-if not session.scalar(
-    text(
-        "SELECT COUNT(*) FROM information_schema.views WHERE table_name = 'show_weather_stations'"
+# define the SQL views
+for m in ["10m", "1h", "dly"]:
+    SHOW_WEATHER_STATIONS = text(
+        f"""
+        CREATE OR REPLACE VIEW show_weather_stations_{m} AS
+        SELECT
+            ws.id,
+            ws.wsi,
+            ws.gh_id,
+            ws.full_name,
+            ws.X,
+            ws.Y,
+            ws.elevation,
+            GROUP_CONCAT(DISTINCT CONCAT(m.name, ' [', m.unit, ']') ORDER BY m.name SEPARATOR ', ') AS measurements_{m}
+        FROM weather_stations ws
+        LEFT JOIN weather_station_measurements_{m} wsm ON ws.id = wsm.weather_station_id
+        LEFT JOIN measurements_{m} m ON wsm.measurement_{m}_id = m.id
+        GROUP BY ws.id, ws.wsi, ws.gh_id, ws.full_name, ws.X, ws.Y, ws.elevation
+        HAVING measurements_{m} IS NOT NULL;
+        """
     )
-):
-    session.execute(SHOW_WEATHER_STATIONS_VIEW)
+    if not session.scalar(
+        text(
+            f"SELECT COUNT(*) FROM information_schema.views WHERE table_name = 'show_weather_stations_{m}'"
+        )
+    ):
+        session.execute(SHOW_WEATHER_STATIONS)
+
 
 # commit changes and close the connection
 session.commit()
