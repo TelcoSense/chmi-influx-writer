@@ -1,43 +1,31 @@
-import configparser
 import json
 import logging
 import os
 import shutil
 import sys
-import time
 from datetime import datetime, timedelta, timezone
 
+# mariadb must be imported because of the pyinstaller
+# in order to compile the executable
+import mariadb
 import requests
-import schedule
+from apscheduler.schedulers.blocking import BlockingScheduler
+from apscheduler.triggers.cron import CronTrigger
 from dateutil.relativedelta import relativedelta
 from influxdb_client import InfluxDBClient, WriteOptions
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from chmi_weather_station_db import (
-    Measurement1H,
-    Measurement10M,
-    MeasurementDLY,
-    WeatherStation,
-)
+from config import DB_CONNECTION_STRING, config
 from parsing_tools import process_metadata
+from ws_db_models import Measurement1H, Measurement10M, MeasurementDLY, WeatherStation
 
 logging.basicConfig(
     # filename="chmi_influx_writer.log",
     level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
+    format="[%(asctime)s] -- %(levelname)s -- %(message)s",
     stream=sys.stdout,
 )
-
-config = configparser.ConfigParser()
-config.read("config.ini")
-
-db_user = config["mariadb"]["user"]
-db_password = config["mariadb"]["password"]
-db_url = config["mariadb"]["url"]
-db_name = config["mariadb"]["db_name"]
-
-DATABASE_URL = f"mariadb+mariadbconnector://{db_user}:{db_password}@{db_url}/{db_name}"
 
 
 def get_utc_date() -> str:
@@ -52,9 +40,7 @@ def get_utc_date() -> str:
     return now.date().strftime("%Y%m%d")
 
 
-def get_data_urls(
-    folder_url,
-) -> list[str]:
+def get_data_urls(folder_url: str, measurement_type: str = "10m") -> list[str]:
     current_date = get_utc_date()
     response = requests.get(folder_url)
     if response.status_code == 200:
@@ -64,16 +50,16 @@ def get_data_urls(
             for line in html_text.splitlines()
             if ".json" in line
             and 'href="' in line
-            and "10m" in line
+            and measurement_type in line
             and current_date in line
         ]
         return file_urls
     else:
-        logging.info(f"Failed to access folder {folder_url}: {response.status_code}")
+        logging.warning(f"Failed to access folder {folder_url}: {response.status_code}")
         return []
 
 
-def get_metadata_urls(folder_url):
+def get_metadata_urls(folder_url: str) -> list[str]:
     response = requests.get(folder_url)
     if response.status_code == 200:
         html_text = response.text
@@ -83,19 +69,19 @@ def get_metadata_urls(folder_url):
             if ".json" in line and 'href="' in line
         ]
     else:
-        print(f"Failed to access folder {folder_url}: {response.status_code}")
+        logging.warning(f"Failed to access folder {folder_url}: {response.status_code}")
         return []
 
 
-def download_file(file_url, realtime_folder):
-    local_file_path = os.path.join(realtime_folder, os.path.basename(file_url))
+def download_file(file_url: str, data_folder: str) -> None:
+    local_file_path = os.path.join(data_folder, os.path.basename(file_url))
     response = requests.get(file_url, stream=True)
     if response.status_code == 200:
         with open(local_file_path, "wb") as file:
             for chunk in response.iter_content(chunk_size=8192):
                 file.write(chunk)
     else:
-        logging.info(f"Failed to download {file_url}: {response.status_code}")
+        logging.warning(f"Failed to download {file_url}: {response.status_code}")
 
 
 def update_measurements_db(
@@ -203,10 +189,8 @@ def update_metadata(session: Session) -> None:
     last_month_dt = datetime.now(tz=timezone.utc) - relativedelta(months=1)
     year = last_month_dt.year
     month = last_month_dt.month
-    chmi_folder = (
-        f"https://opendata.chmi.cz/meteorology/climate/recent/metadata/{month:02d}/"
-    )
-    local_folder = "last_month/metadata"
+    chmi_folder = f"{config.get("folders", "chmi_metadata_folder")}{month:02d}/"
+    local_folder = "metadata"
     if os.path.exists(local_folder):
         shutil.rmtree(local_folder)
     os.makedirs(local_folder, exist_ok=True)
@@ -232,92 +216,101 @@ def update_metadata(session: Session) -> None:
 
 
 def write_latest_data() -> None:
-    logging.info("Connecting to the DBs...")
-    # influxdb connection
-    client = InfluxDBClient(
-        url=config.get("influxdb", "url"),
-        token=config.get("influxdb", "token"),
-        org="vut",
-    )
-    write_api = client.write_api(write_options=WriteOptions(batch_size=5000))
-    # mariadb connection
-    engine = create_engine(DATABASE_URL)
-    session = Session(engine)
-    # utc now date
-    utc_now = datetime.now(timezone.utc)
-    # subtract one hour from current utc time
-    start_time = utc_now - timedelta(hours=1)
-    # start at the hour mark
-    start_time = start_time.replace(minute=0, second=0, microsecond=0)
-    # update the mariadb once a month (15th day between 03:00 and 04:00)
-    if utc_now.day == 15 and utc_now.hour == 3:
-        update_metadata(session)
+    try:
+        logging.info("Connecting to the DBs...")
+        # influxdb connection
+        client = InfluxDBClient(
+            url=config.get("influxdb", "url"),
+            token=config.get("influxdb", "token"),
+            org="vut",
+        )
+        write_api = client.write_api(write_options=WriteOptions(batch_size=5000))
+        # mariadb connection
+        engine = create_engine(DB_CONNECTION_STRING)
+        session = Session(engine)
+        # utc now date
+        utc_now = datetime.now(timezone.utc)
+        # subtract one hour from current utc time
+        start_time = utc_now - timedelta(hours=1)
+        # start at the hour mark
+        start_time = start_time.replace(minute=0, second=0, microsecond=0)
+        # update the mariadb once a month (15th day between 03:00 and 04:00)
+        if utc_now.day == 15 and utc_now.hour == 3:
+            update_metadata(session)
 
-    # delete the realtime folder and its contents
-    realtime_folder = config.get("folders", "realtime_folder")
-    if os.path.exists(realtime_folder):
-        shutil.rmtree(realtime_folder)
-    # create it again
-    os.makedirs(realtime_folder, exist_ok=True)
-    # get the file urls to download
-    file_urls = get_data_urls(config.get("folders", "chmi_now_folder"))
-    logging.info("Downloading latest data from CHMI...")
-    for file_url in file_urls:
-        download_file(file_url, realtime_folder)
-    data_files = os.listdir(realtime_folder)
-    logging.info(f"Parsing data from {len(data_files)} weather stations.")
-    for data_file in data_files:
-        with open(
-            os.path.join(realtime_folder, data_file), "r", encoding="utf-8"
-        ) as file:
-            data = json.load(file)
-        date_string = start_time.strftime("%Y%m%d")
-        # get current weather station id (WSI)
-        wsi = data_file.removeprefix("10m-").removesuffix(f"-{date_string}.json")
-        ws_db = session.scalar(select(WeatherStation).where(WeatherStation.wsi == wsi))
-        # if the current weather station is not in the db, don't write any data
-        if not ws_db:
-            continue
-        gh_id = ws_db.gh_id
-        values = data["data"]["data"]["values"]
-        data_to_write = []
-        for value in values:
-            dt = datetime.strptime(value[-4], "%Y-%m-%dT%H:%M:%SZ").replace(
-                tzinfo=timezone.utc
+        # delete the realtime folder and its contents
+        realtime_folder = config.get("folders", "realtime_folder")
+        if os.path.exists(realtime_folder):
+            shutil.rmtree(realtime_folder)
+        # create it again
+        os.makedirs(realtime_folder, exist_ok=True)
+        # get the file urls to download
+        file_urls = get_data_urls(config.get("folders", "chmi_now_folder"))
+        logging.info("Downloading latest data from CHMI...")
+        for file_url in file_urls:
+            download_file(file_url, realtime_folder)
+        data_files = os.listdir(realtime_folder)
+        logging.info(f"Parsing data from {len(data_files)} weather stations.")
+        for data_file in data_files:
+            with open(
+                os.path.join(realtime_folder, data_file), "r", encoding="utf-8"
+            ) as file:
+                data = json.load(file)
+            date_string = start_time.strftime("%Y%m%d")
+            # get current weather station id (WSI)
+            wsi = data_file.removeprefix("10m-").removesuffix(f"-{date_string}.json")
+            ws_db = session.scalar(
+                select(WeatherStation).where(WeatherStation.wsi == wsi)
             )
-            # write only the last hour data
-            if type(value[-3]) == float and dt >= start_time:
-                data_to_write.append(
-                    {
-                        "measurement": value[1],
-                        "fields": {gh_id: value[-3]},
-                        "time": int(dt.timestamp() * 1e9),
-                    },
+            # if the current weather station is not in the db, don't write any data
+            if not ws_db:
+                continue
+            gh_id = ws_db.gh_id
+            values = data["data"]["data"]["values"]
+            data_to_write = []
+            for value in values:
+                dt = datetime.strptime(value[-4], "%Y-%m-%dT%H:%M:%SZ").replace(
+                    tzinfo=timezone.utc
                 )
-        write_api.write(bucket="chmi_data", record=data_to_write, write_precision="ns")
-    logging.info("Disconnecting from the DBs...")
-    write_api.close()
-    client.close()
-    session.close()
-    engine.dispose()
-    logging.info("Connection closed.")
+                # get the last hour data only (typically 6 values for each measurement)
+                if type(value[-3]) == float and dt >= start_time:
+                    data_to_write.append(
+                        {
+                            "measurement": value[1],
+                            "fields": {gh_id: value[-3]},
+                            "time": int(dt.timestamp() * 1e9),
+                        },
+                    )
+            write_api.write(
+                bucket="chmi_data", record=data_to_write, write_precision="ns"
+            )
+        logging.info("Disconnecting from the DBs...")
+        write_api.close()
+        client.close()
+        session.close()
+        engine.dispose()
+        logging.info("Connection closed.")
+    except Exception as e:
+        logging.error(f"Error in job execution: {e}", exc_info=True)
 
 
-def schedule_task():
-    schedule.every().hour.at(":30").do(write_latest_data)
-
-
-def run_scheduler():
-    while True:
-        try:
-            schedule.run_pending()
-            time.sleep(30)
-        except Exception as e:
-            logging.error(f"Error in scheduler: {e}", exc_info=True)
-            time.sleep(10)
+def main():
+    logging.info("CHMI InfluxDB writer started.")
+    logging.info("Starting scheduler...")
+    scheduler = BlockingScheduler()
+    scheduler.add_job(
+        write_latest_data,
+        trigger=CronTrigger(minute=30, timezone=timezone.utc),
+        id="realtime_writer",
+        replace_existing=True,
+    )
+    try:
+        logging.info("Scheduler started. Press Ctrl + C to exit.")
+        scheduler.start()
+    except (KeyboardInterrupt, SystemExit):
+        logging.info("Shutting down scheduler...")
+        scheduler.shutdown()
 
 
 if __name__ == "__main__":
-    logging.info("CHMI InfluxDB writer started.")
-    schedule_task()
-    run_scheduler()
+    main()

@@ -1,7 +1,11 @@
 from sqlalchemy import Column, Float, ForeignKey, Integer, String, Table
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+# this file contains all table definitions for the chmi_metadata db
 
+
+# must define a base class for sqlalchemy
+# it is also used for creating the tables in the db
 class Base(DeclarativeBase):
     pass
 

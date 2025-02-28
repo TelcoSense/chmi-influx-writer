@@ -1,6 +1,4 @@
 import json
-import os
-import shutil
 
 import pandas as pd
 
@@ -34,7 +32,7 @@ def add_measurements(
     return ws_dict, sorted(measurements_df.values.tolist())
 
 
-def process_metadata(input_dir, year, month) -> list:
+def process_metadata(input_dir, year, month) -> tuple[dict, list, list, list]:
     meta1 = f"{input_dir}/meta1-{year}{month:02d}.json"
     headers, values = extract_chmi_metadata(meta1)
     ws_dict = {}

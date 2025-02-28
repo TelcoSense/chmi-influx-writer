@@ -4,6 +4,8 @@ from collections.abc import Mapping
 
 import pandas as pd
 
+# script for merging weather station metadata from multiple years and respective months
+
 
 # merging funcs
 def deep_merge(*dicts):

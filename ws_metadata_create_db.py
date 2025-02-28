@@ -4,7 +4,8 @@ import json
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session
 
-from chmi_weather_station_db import (
+from config import DB_CONNECTION_STRING, DB_SERVER_CONNECTION_STRING
+from ws_db_models import (
     Base,
     Measurement1H,
     Measurement10M,
@@ -12,17 +13,9 @@ from chmi_weather_station_db import (
     WeatherStation,
 )
 
-config = configparser.ConfigParser()
-config.read("config.ini")
+# create the chmi_metadata db from scratch
 
-db_user = config["mariadb"]["user"]
-db_password = config["mariadb"]["password"]
-db_url = config["mariadb"]["url"]
-db_name = config["mariadb"]["db_name"]
-
-DATABASE_SERVER_URL = f"mariadb+mariadbconnector://{db_user}:{db_password}@{db_url}"
-engine = create_engine(DATABASE_SERVER_URL)
-
+engine = create_engine(DB_SERVER_CONNECTION_STRING)
 with engine.connect() as conn:
     # drop the db if it already exists
     conn.execute(text(f"DROP DATABASE IF EXISTS chmi_metadata"))
@@ -33,13 +26,11 @@ with engine.connect() as conn:
         )
     )
     conn.commit()
-
-DATABASE_URL = f"mariadb+mariadbconnector://{db_user}:{db_password}@{db_url}/{db_name}"
-engine = create_engine(DATABASE_URL)
+engine.dispose()
 
 # create all tables
+engine = create_engine(DB_CONNECTION_STRING)
 Base.metadata.create_all(engine)
-
 # create session for adding rows to tables
 session = Session(engine)
 
@@ -148,3 +139,4 @@ for m in ["10m", "1h", "dly"]:
 # commit changes and close the connection
 session.commit()
 session.close()
+engine.dispose()

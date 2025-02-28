@@ -1,21 +1,17 @@
 import json
+import logging
 import os
+import shutil
+import sys
 from datetime import datetime, timezone
 
+import requests
+from dateutil.relativedelta import relativedelta
 from influxdb_client import InfluxDBClient, WriteOptions
 from tqdm import tqdm
 
-TOKEN = ""
-
-# client = InfluxDBClient(url="https://data.telcorain.cz", token=TOKEN, org="vut")
-# buckets_api = client.buckets_api()
-# buckets = buckets_api.find_bucket_by_name("chmi_data")
-# if buckets:
-#     buckets_api.delete_bucket(buckets)
-#     print("Bucket deleted.")
-# # bucket = buckets_api.create_bucket(
-# #     bucket_name="chmi_data", retention_rules=None, org="vut"
-# # )
+from config import config
+from influx_writer_realtime import download_file
 
 for month in range(1, 2):
     year = 2025
@@ -26,7 +22,11 @@ for month in range(1, 2):
     with open(meta_file, "r", encoding="utf-8") as file:
         meta = json.load(file)
 
-    client = InfluxDBClient(url="https://data.telcorain.cz", token=TOKEN, org="vut")
+    client = InfluxDBClient(
+        url=config.get("influxdb", "url"),
+        token=config.get("influxdb", "token"),
+        org=config.get("influxdb", "org"),
+    )
     write_api = client.write_api(write_options=WriteOptions(batch_size=5000))
 
     input_base_dir = f"./{year}/data/10min"
@@ -39,7 +39,6 @@ for month in range(1, 2):
             f"./{year}/data/10min/{month_folder}/{data_file}", "r", encoding="utf-8"
         ) as file:
             data = json.load(file)
-        # headers = data["data"]["data"]["header"].split(",")
         values = data["data"]["data"]["values"]
         data_to_write = []
         for value in values:
@@ -61,3 +60,7 @@ for month in range(1, 2):
     print("Closing connection.")
     write_api.close()
     client.close()
+
+
+# def write_single_month_data():
+#     pass
