@@ -18,9 +18,10 @@ from parsing_tools import process_metadata
 from ws_db_models import Measurement1H, Measurement10M, MeasurementDLY, WeatherStation
 
 logging.basicConfig(
+    filename="realtime.log",
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
-    stream=sys.stdout,
+    # stream=sys.stdout,
 )
 
 
