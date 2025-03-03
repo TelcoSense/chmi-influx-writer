@@ -2,8 +2,7 @@ import json
 import logging
 import os
 import shutil
-import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import requests
 from dateutil.relativedelta import relativedelta
@@ -16,10 +15,9 @@ from influx_writer_realtime import download_file
 from ws_db_models import WeatherStation
 
 logging.basicConfig(
-    # filename="influx_writer_last_month.log",
+    filename="last_month.log",
     level=logging.INFO,
-    format="[%(asctime)s] -- %(levelname)s -- %(message)s",
-    stream=sys.stdout,
+    format="%(asctime)s - %(levelname)s - %(message)s",
 )
 
 
@@ -38,7 +36,34 @@ def get_data_urls(folder_url: str, measurement_type: str = "10m") -> list[str]:
         return []
 
 
-def write_single_month_data(data_folder, year, month) -> None:
+def delete_single_month_data(client: InfluxDBClient, year: int, month: int) -> None:
+    start_time = datetime(year=year, month=month, day=1, tzinfo=timezone.utc)
+    end_time = datetime(
+        year=year, month=month + 1, day=1, tzinfo=timezone.utc
+    ) - timedelta(seconds=1)
+    start_time_iso = start_time.isoformat().replace("+00:00", "Z")
+    end_time_iso = end_time.isoformat().replace("+00:00", "Z")
+    delete_api = client.delete_api()
+    logging.info("Deleting last month data...")
+    delete_api.delete(
+        start=start_time_iso,
+        stop=end_time_iso,
+        bucket="chmi_data",
+        org=config.get("influxdb", "org"),
+        # empty predicate must be defined in order to delete all data
+        predicate="",
+    )
+    logging.info("Data successfully deleted.")
+
+
+def write_single_month_data(
+    data_folder,
+    year,
+    month,
+    delete_bucket_data: bool = True,
+    measurement: str = None,
+    measurement_type: str = "10m",
+) -> None:
     client = InfluxDBClient(
         url=config.get("influxdb", "url"),
         token=config.get("influxdb", "token"),
@@ -48,11 +73,15 @@ def write_single_month_data(data_folder, year, month) -> None:
     # mariadb connection
     engine = create_engine(DB_CONNECTION_STRING)
     session = Session(engine)
+    # delete data that was written using real time writer
+    if delete_bucket_data:
+        delete_single_month_data(client, year, month)
 
-    "TODO: wipeout the last month data from the bucket!"
-
+    logging.info("Writing started.")
     for data_file in os.listdir(data_folder):
-        wsi = data_file.removeprefix("10m-").removesuffix(f"-{year}{month:02d}.json")
+        wsi = data_file.removeprefix(f"{measurement_type}-").removesuffix(
+            f"-{year}{month:02d}.json"
+        )
         ws_db = session.scalar(select(WeatherStation).where(WeatherStation.wsi == wsi))
         # if the current weather station is not in the db, don't write any data
         if not ws_db:
@@ -63,26 +92,52 @@ def write_single_month_data(data_folder, year, month) -> None:
         values = data["data"]["data"]["values"]
         data_to_write = []
         for value in values:
-            if value[-1] == 0.0 and type(value[-3]) == float:
-                dt = datetime.strptime(value[-4], "%Y-%m-%dT%H:%M:%SZ").replace(
-                    tzinfo=timezone.utc
-                )
-                data_to_write.append(
-                    {
-                        "measurement": value[1],
-                        "fields": {gh_id: value[-3]},
-                        # time in nanoseconds for efficiency
-                        "time": int(dt.timestamp() * 1e9),
-                    },
-                )
+            if measurement:
+                if (
+                    value[-1] == 0.0
+                    and type(value[-3]) == float
+                    and measurement == "SRA"
+                ):
+                    dt = datetime.strptime(value[-4], "%Y-%m-%dT%H:%M:%SZ").replace(
+                        tzinfo=timezone.utc
+                    )
+                    data_to_write.append(
+                        {
+                            "measurement": value[1],
+                            "fields": {gh_id: value[-3]},
+                            # time in nanoseconds for efficiency
+                            "time": int(dt.timestamp() * 1e9),
+                        },
+                    )
+            else:
+                if value[-1] == 0.0 and type(value[-3]) == float:
+                    dt = datetime.strptime(value[-4], "%Y-%m-%dT%H:%M:%SZ").replace(
+                        tzinfo=timezone.utc
+                    )
+                    data_to_write.append(
+                        {
+                            "measurement": value[1],
+                            "fields": {gh_id: value[-3]},
+                            # time in nanoseconds for efficiency
+                            "time": int(dt.timestamp() * 1e9),
+                        },
+                    )
         # must write in ns
-        # write_api.write(bucket="chmi_data", record=data_to_write, write_precision="ns")
-    print("Closing connection.")
+        write_api.write(bucket="chmi_data", record=data_to_write, write_precision="ns")
+    logging.info("Disconnecting from the DBs...")
     write_api.close()
     client.close()
+    session.close()
+    engine.dispose()
+    logging.info("Connection closed.")
 
 
-def write_last_month_data(measurement_folder: str = "10min"):
+def write_last_month_data(
+    measurement_folder: str = "10min",
+    measurement_type: str = "10m",
+    delete_bucket_data: bool = True,
+    measurement: str = None,
+):
     logging.info("Checking the CHMI data...")
     last_month_folder = config.get("folders", "last_month_folder")
     if os.path.exists(last_month_folder):
@@ -94,7 +149,7 @@ def write_last_month_data(measurement_folder: str = "10min"):
     month = last_month_dt.month
     remote_folder = config.get("folders", "chmi_data_folder")
     remote_folder = f"{remote_folder}{measurement_folder}/{month:02d}/"
-    file_urls = get_data_urls(remote_folder)
+    file_urls = get_data_urls(remote_folder, measurement_type)
     for file_url in file_urls:
         if not f"{year}{month:02d}" in file_url:
             logging.info("Data is not ready")
@@ -103,7 +158,14 @@ def write_last_month_data(measurement_folder: str = "10min"):
     for file_url in file_urls:
         download_file(file_url, last_month_folder)
     # write the last month data
-    write_single_month_data(last_month_folder, year, month)
+    write_single_month_data(
+        last_month_folder,
+        year,
+        month,
+        delete_bucket_data,
+        measurement,
+        measurement_type,
+    )
     # cleanup
     logging.info("Cleaning up the folder...")
     shutil.rmtree(last_month_folder)
@@ -112,7 +174,9 @@ def write_last_month_data(measurement_folder: str = "10min"):
 
 def main():
     try:
-        write_last_month_data()
+        write_last_month_data("10min", "10m", True)
+        # write also daily rainfall
+        write_last_month_data("daily", "dly", False, "SRA")
     except Exception as e:
         logging.error(f"Error during data writing: {e}", exc_info=True)
 

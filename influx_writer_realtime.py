@@ -5,9 +5,6 @@ import shutil
 import sys
 from datetime import datetime, timedelta, timezone
 
-# mariadb must be imported because of the pyinstaller
-# in order to compile the executable
-import mariadb
 import requests
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -21,9 +18,8 @@ from parsing_tools import process_metadata
 from ws_db_models import Measurement1H, Measurement10M, MeasurementDLY, WeatherStation
 
 logging.basicConfig(
-    # filename="chmi_influx_writer.log",
     level=logging.INFO,
-    format="[%(asctime)s] -- %(levelname)s -- %(message)s",
+    format="%(asctime)s - %(levelname)s - %(message)s",
     stream=sys.stdout,
 )
 
@@ -186,6 +182,7 @@ def update_weather_stations_db(session: Session, weather_stations: dict):
 
 
 def update_metadata(session: Session) -> None:
+    logging.info(f"Updating DB metadata.")
     last_month_dt = datetime.now(tz=timezone.utc) - relativedelta(months=1)
     year = last_month_dt.year
     month = last_month_dt.month
@@ -305,7 +302,7 @@ def main():
         replace_existing=True,
     )
     try:
-        logging.info("Scheduler started. Press Ctrl + C to exit.")
+        logging.info("Scheduler started. Press Ctrl+C to exit.")
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):
         logging.info("Shutting down scheduler...")
