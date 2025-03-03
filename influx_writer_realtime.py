@@ -231,8 +231,8 @@ def write_latest_data() -> None:
         start_time = utc_now - timedelta(hours=1)
         # start at the hour mark
         start_time = start_time.replace(minute=0, second=0, microsecond=0)
-        # update the mariadb once a month (15th day between 03:00 and 04:00)
-        if utc_now.day == 15 and utc_now.hour == 3:
+        # update the mariadb once a month (15th day between 02:00 and 03:00)
+        if utc_now.day == 15 and utc_now.hour == 2:
             update_metadata(session)
 
         # delete the realtime folder and its contents
