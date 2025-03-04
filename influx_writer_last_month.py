@@ -1,5 +1,4 @@
 import json
-import logging
 import os
 import shutil
 from datetime import datetime, timedelta, timezone
@@ -11,14 +10,8 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from config import DB_CONNECTION_STRING, config
+from config import last_month_logger as logger
 from ws_db_models import WeatherStation
-
-logging.basicConfig(
-    filename="last_month.log",
-    # stream=sys.stdout,
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-)
 
 
 def get_data_urls(folder_url: str, measurement_type: str = "10m") -> list[str]:
@@ -32,7 +25,7 @@ def get_data_urls(folder_url: str, measurement_type: str = "10m") -> list[str]:
         ]
         return file_urls
     else:
-        logging.warning(f"Failed to access folder {folder_url}: {response.status_code}")
+        logger.warning(f"Failed to access folder {folder_url}: {response.status_code}")
         return []
 
 
@@ -44,7 +37,7 @@ def download_file(file_url: str, data_folder: str) -> None:
             for chunk in response.iter_content(chunk_size=8192):
                 file.write(chunk)
     else:
-        logging.warning(f"Failed to download {file_url}: {response.status_code}")
+        logger.warning(f"Failed to download {file_url}: {response.status_code}")
 
 
 def delete_single_month_data(client: InfluxDBClient, year: int, month: int) -> None:
@@ -55,7 +48,7 @@ def delete_single_month_data(client: InfluxDBClient, year: int, month: int) -> N
     start_time_iso = start_time.isoformat().replace("+00:00", "Z")
     end_time_iso = end_time.isoformat().replace("+00:00", "Z")
     delete_api = client.delete_api()
-    logging.info("Deleting last month data...")
+    logger.info("Deleting last month data...")
     delete_api.delete(
         start=start_time_iso,
         stop=end_time_iso,
@@ -64,7 +57,7 @@ def delete_single_month_data(client: InfluxDBClient, year: int, month: int) -> N
         # empty predicate must be defined in order to delete all data
         predicate="",
     )
-    logging.info("Data successfully deleted.")
+    logger.info("Data successfully deleted.")
 
 
 def write_single_month_data(
@@ -88,7 +81,7 @@ def write_single_month_data(
     if delete_bucket_data:
         delete_single_month_data(client, year, month)
 
-    logging.info("Writing started.")
+    logger.info("Writing started.")
     for data_file in os.listdir(data_folder):
         wsi = data_file.removeprefix(f"{measurement_type}-").removesuffix(
             f"-{year}{month:02d}.json"
@@ -135,12 +128,12 @@ def write_single_month_data(
                     )
         # must write in ns
         write_api.write(bucket="chmi_data", record=data_to_write, write_precision="ns")
-    logging.info("Disconnecting from the DBs...")
+    logger.info("Disconnecting from the DBs...")
     write_api.close()
     client.close()
     session.close()
     engine.dispose()
-    logging.info("Connection closed.")
+    logger.info("Connection closed.")
 
 
 def write_last_month_data(
@@ -149,7 +142,7 @@ def write_last_month_data(
     delete_bucket_data: bool = True,
     measurement: str = None,
 ):
-    logging.info("Checking the CHMI data...")
+    logger.info("Checking the CHMI data...")
     last_month_folder = config.get("folders", "last_month_folder")
     if os.path.exists(last_month_folder):
         shutil.rmtree(last_month_folder)
@@ -163,9 +156,9 @@ def write_last_month_data(
     file_urls = get_data_urls(remote_folder, measurement_type)
     for file_url in file_urls:
         if not f"{year}{month:02d}" in file_url:
-            logging.info("Data is not ready")
+            logger.info("Data is not ready")
             return
-    logging.info("Downloading data from CHMI...")
+    logger.info("Downloading data from CHMI...")
     for file_url in file_urls:
         download_file(file_url, last_month_folder)
     # write the last month data
@@ -178,9 +171,9 @@ def write_last_month_data(
         measurement_type,
     )
     # cleanup
-    logging.info("Cleaning up the folder...")
+    logger.info("Cleaning up the folder...")
     shutil.rmtree(last_month_folder)
-    logging.info("Writing finished successfully.")
+    logger.info("Writing finished successfully.")
 
 
 def main():
@@ -189,7 +182,7 @@ def main():
         # write also daily rainfall
         write_last_month_data("daily", "dly", False, "SRA")
     except Exception as e:
-        logging.error(f"Error during data writing: {e}", exc_info=True)
+        logger.error(f"Error during data writing: {e}", exc_info=True)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,4 @@
 import json
-import logging
 import os
 import shutil
 from datetime import datetime, timedelta, timezone
@@ -13,15 +12,9 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from config import DB_CONNECTION_STRING, config
+from config import realtime_logger as logger
 from parsing_tools import process_metadata
 from ws_db_models import Measurement1H, Measurement10M, MeasurementDLY, WeatherStation
-
-logging.basicConfig(
-    filename="realtime.log",
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    # stream=sys.stdout,
-)
 
 
 def get_utc_date() -> str:
@@ -51,7 +44,7 @@ def get_data_urls(folder_url: str, measurement_type: str = "10m") -> list[str]:
         ]
         return file_urls
     else:
-        logging.warning(f"Failed to access folder {folder_url}: {response.status_code}")
+        logger.warning(f"Failed to access folder {folder_url}: {response.status_code}")
         return []
 
 
@@ -65,7 +58,7 @@ def get_metadata_urls(folder_url: str) -> list[str]:
             if ".json" in line and 'href="' in line
         ]
     else:
-        logging.warning(f"Failed to access folder {folder_url}: {response.status_code}")
+        logger.warning(f"Failed to access folder {folder_url}: {response.status_code}")
         return []
 
 
@@ -77,7 +70,7 @@ def download_file(file_url: str, data_folder: str) -> None:
             for chunk in response.iter_content(chunk_size=8192):
                 file.write(chunk)
     else:
-        logging.warning(f"Failed to download {file_url}: {response.status_code}")
+        logger.warning(f"Failed to download {file_url}: {response.status_code}")
 
 
 def update_measurements_db(
@@ -85,7 +78,7 @@ def update_measurements_db(
     measurements: list[list],
     measurement_type: Measurement10M | Measurement1H | MeasurementDLY,
 ) -> None:
-    logging.info(f"Updating the {measurement_type.__tablename__} table...")
+    logger.info(f"Updating the {measurement_type.__tablename__} table...")
     for measurement in measurements:
         measurement_db = session.scalar(
             select(measurement_type).where(
@@ -96,7 +89,7 @@ def update_measurements_db(
             measurement_db = measurement_type(
                 abbreviation=measurement[0], name=measurement[1], unit=measurement[2]
             )
-            logging.info(f"Created new measurement named: {measurement[1]}")
+            logger.info(f"Created new measurement named: {measurement[1]}")
 
 
 def update_ws_measurements(
@@ -116,7 +109,7 @@ def update_ws_measurements(
                 continue
             else:
                 ws.measurements_10m.append(measurement_db)
-                logging.info(
+                logger.info(
                     f"Updated 10m measurements of the weather station: {ws.full_name}"
                 )
         elif measurement_db and measurement_type == Measurement1H:
@@ -124,7 +117,7 @@ def update_ws_measurements(
                 continue
             else:
                 ws.measurements_1h.append(measurement_db)
-                logging.info(
+                logger.info(
                     f"Updated 1h measurements of the weather station: {ws.full_name}"
                 )
         elif measurement_db and measurement_type == MeasurementDLY:
@@ -132,13 +125,13 @@ def update_ws_measurements(
                 continue
             else:
                 ws.measurements_dly.append(measurement_db)
-                logging.info(
+                logger.info(
                     f"Updated dly measurements of the weather station: {ws.full_name}"
                 )
 
 
 def update_weather_stations_db(session: Session, weather_stations: dict):
-    logging.info(f"Updating the weather_stations table...")
+    logger.info(f"Updating the weather_stations table...")
     for wsi in weather_stations:
         weather_station = weather_stations[wsi]
         has_10m = "10M" in weather_station
@@ -161,7 +154,7 @@ def update_weather_stations_db(session: Session, weather_stations: dict):
                     elevation=weather_station["ELEVATION"],
                 )
                 session.add(weather_station_db)
-                logging.info(
+                logger.info(
                     f"Created new weather station named: {weather_station_db.full_name}"
                 )
             # if the ws has 10m measurements, update them
@@ -182,7 +175,7 @@ def update_weather_stations_db(session: Session, weather_stations: dict):
 
 
 def update_metadata(session: Session) -> None:
-    logging.info(f"Updating DB metadata.")
+    logger.info(f"Updating DB metadata.")
     last_month_dt = datetime.now(tz=timezone.utc) - relativedelta(months=1)
     year = last_month_dt.year
     month = last_month_dt.month
@@ -195,7 +188,7 @@ def update_metadata(session: Session) -> None:
     for file_url in file_urls:
         # if the data is not current for some reason, abort the metadata update
         if not f"{year}{month:02d}" in file_url:
-            logging.info(f"CHMI metadata was not ready.")
+            logger.info(f"CHMI metadata was not ready.")
             return
     # download the metadata files
     for file_url in file_urls:
@@ -209,12 +202,12 @@ def update_metadata(session: Session) -> None:
     update_weather_stations_db(session, ws_dict)
     # commit the potential changes
     session.commit()
-    logging.info(f"DB update complete.")
+    logger.info(f"DB update complete.")
 
 
 def write_latest_data() -> None:
     try:
-        logging.info("Connecting to the DBs...")
+        logger.info("Connecting to the DBs...")
         # influxdb connection
         client = InfluxDBClient(
             url=config.get("influxdb", "url"),
@@ -243,11 +236,11 @@ def write_latest_data() -> None:
         os.makedirs(realtime_folder, exist_ok=True)
         # get the file urls to download
         file_urls = get_data_urls(config.get("folders", "chmi_now_folder"))
-        logging.info("Downloading latest data from CHMI...")
+        logger.info("Downloading latest data from CHMI...")
         for file_url in file_urls:
             download_file(file_url, realtime_folder)
         data_files = os.listdir(realtime_folder)
-        logging.info(f"Parsing data from {len(data_files)} weather stations.")
+        logger.info(f"Parsing data from {len(data_files)} weather stations.")
         for data_file in data_files:
             with open(
                 os.path.join(realtime_folder, data_file), "r", encoding="utf-8"
@@ -281,19 +274,19 @@ def write_latest_data() -> None:
             write_api.write(
                 bucket="chmi_data", record=data_to_write, write_precision="ns"
             )
-        logging.info("Disconnecting from the DBs...")
+        logger.info("Disconnecting from the DBs...")
         write_api.close()
         client.close()
         session.close()
         engine.dispose()
-        logging.info("Connection closed.")
+        logger.info("Connection closed.")
     except Exception as e:
-        logging.error(f"Error in job execution: {e}", exc_info=True)
+        logger.error(f"Error in job execution: {e}", exc_info=True)
 
 
 def main():
-    logging.info("CHMI InfluxDB writer started.")
-    logging.info("Starting scheduler...")
+    logger.info("CHMI InfluxDB writer started.")
+    logger.info("Starting scheduler...")
     scheduler = BlockingScheduler()
     scheduler.add_job(
         write_latest_data,
@@ -302,10 +295,10 @@ def main():
         replace_existing=True,
     )
     try:
-        logging.info("Scheduler started. Press Ctrl+C to exit.")
+        logger.info("Scheduler started. Press Ctrl+C to exit.")
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):
-        logging.info("Shutting down scheduler...")
+        logger.info("Shutting down scheduler...")
         scheduler.shutdown()
 
 
