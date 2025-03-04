@@ -302,6 +302,7 @@ def main():
         trigger=CronTrigger(minute=30, timezone=timezone.utc),
         id="realtime_writer",
         replace_existing=True,
+        misfire_grace_time=300,
     )
     try:
         logger.info("Scheduler started. Press Ctrl+C to exit.")
