@@ -233,6 +233,8 @@ def write_latest_data() -> None:
         start_time = utc_now - timedelta(hours=1)
         # start at the hour mark
         start_time = start_time.replace(minute=0, second=0, microsecond=0)
+        # set the end time (HH:50)
+        end_time = start_time + timedelta(minutes=50)
         # update the mariadb once a month (15th day between 02:00 and 03:00)
         if utc_now.day == 15 and utc_now.hour == 2:
             update_metadata(session)
@@ -251,10 +253,15 @@ def write_latest_data() -> None:
         data_files = os.listdir(realtime_folder)
         logger.info(f"Parsing data from {len(data_files)} weather stations.")
         for data_file in data_files:
-            with open(
-                os.path.join(realtime_folder, data_file), "r", encoding="utf-8"
-            ) as file:
-                data = json.load(file)
+            # sometimes the json cannot be opened
+            try:
+                with open(
+                    os.path.join(realtime_folder, data_file), "r", encoding="utf-8"
+                ) as file:
+                    data = json.load(file)
+            except json.JSONDecodeError:
+                logger.error(f"Could not decode file: {data_file}, skipping...")
+                continue
             date_string = start_time.strftime("%Y%m%d")
             # get current weather station id (WSI)
             wsi = data_file.removeprefix("10m-").removesuffix(f"-{date_string}.json")
@@ -272,7 +279,7 @@ def write_latest_data() -> None:
                     tzinfo=timezone.utc
                 )
                 # get the last hour data only (typically 6 values for each measurement)
-                if type(value[-3]) == float and dt >= start_time:
+                if type(value[-3]) == float and dt >= start_time and dt <= end_time:
                     data_to_write.append(
                         {
                             "measurement": value[1],
