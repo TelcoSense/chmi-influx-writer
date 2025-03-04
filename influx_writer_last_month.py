@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import shutil
+import sys
 from datetime import datetime, timedelta, timezone
 
 import requests
@@ -16,6 +17,7 @@ from ws_db_models import WeatherStation
 
 logging.basicConfig(
     filename="last_month.log",
+    # stream=sys.stdout,
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
@@ -96,7 +98,7 @@ def write_single_month_data(
                 if (
                     value[-1] == 0.0
                     and type(value[-3]) == float
-                    and measurement == "SRA"
+                    and measurement == value[1]
                 ):
                     dt = datetime.strptime(value[-4], "%Y-%m-%dT%H:%M:%SZ").replace(
                         tzinfo=timezone.utc
@@ -143,7 +145,7 @@ def write_last_month_data(
     if os.path.exists(last_month_folder):
         shutil.rmtree(last_month_folder)
     os.makedirs(last_month_folder, exist_ok=True)
-    last_month_dt = datetime.now(tz=timezone.utc) - relativedelta(months=1)
+    last_month_dt = datetime.now(tz=timezone.utc) - relativedelta(months=2)
     # define remote folder
     year = last_month_dt.year
     month = last_month_dt.month
