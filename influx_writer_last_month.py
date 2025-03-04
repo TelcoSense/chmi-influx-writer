@@ -2,7 +2,6 @@ import json
 import logging
 import os
 import shutil
-import sys
 from datetime import datetime, timedelta, timezone
 
 import requests
@@ -12,7 +11,6 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from config import DB_CONNECTION_STRING, config
-from influx_writer_realtime import download_file
 from ws_db_models import WeatherStation
 
 logging.basicConfig(
@@ -36,6 +34,17 @@ def get_data_urls(folder_url: str, measurement_type: str = "10m") -> list[str]:
     else:
         logging.warning(f"Failed to access folder {folder_url}: {response.status_code}")
         return []
+
+
+def download_file(file_url: str, data_folder: str) -> None:
+    local_file_path = os.path.join(data_folder, os.path.basename(file_url))
+    response = requests.get(file_url, stream=True)
+    if response.status_code == 200:
+        with open(local_file_path, "wb") as file:
+            for chunk in response.iter_content(chunk_size=8192):
+                file.write(chunk)
+    else:
+        logging.warning(f"Failed to download {file_url}: {response.status_code}")
 
 
 def delete_single_month_data(client: InfluxDBClient, year: int, month: int) -> None:
