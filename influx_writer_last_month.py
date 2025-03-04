@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import shutil
 from datetime import datetime, timedelta, timezone
@@ -10,8 +11,16 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from config import DB_CONNECTION_STRING, config
-from config import last_month_logger as logger
 from ws_db_models import WeatherStation
+
+# logging setup
+logger = logging.getLogger("last_month_logger")
+logger.setLevel(logging.INFO)
+file_handler = logging.FileHandler("last_month.log")
+file_handler.setFormatter(
+    logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+)
+logger.addHandler(file_handler)
 
 
 def get_data_urls(folder_url: str, measurement_type: str = "10m") -> list[str]:
@@ -147,7 +156,7 @@ def write_last_month_data(
     if os.path.exists(last_month_folder):
         shutil.rmtree(last_month_folder)
     os.makedirs(last_month_folder, exist_ok=True)
-    last_month_dt = datetime.now(tz=timezone.utc) - relativedelta(months=2)
+    last_month_dt = datetime.now(tz=timezone.utc) - relativedelta(months=1)
     # define remote folder
     year = last_month_dt.year
     month = last_month_dt.month

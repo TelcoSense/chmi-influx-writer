@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import shutil
 from datetime import datetime, timedelta, timezone
@@ -12,9 +13,17 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from config import DB_CONNECTION_STRING, config
-from config import realtime_logger as logger
 from parsing_tools import process_metadata
 from ws_db_models import Measurement1H, Measurement10M, MeasurementDLY, WeatherStation
+
+# logging setup
+logger = logging.getLogger("realtime_logger")
+logger.setLevel(logging.INFO)
+file_handler = logging.FileHandler("realtime.log")
+file_handler.setFormatter(
+    logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+)
+logger.addHandler(file_handler)
 
 
 def get_utc_date() -> str:
